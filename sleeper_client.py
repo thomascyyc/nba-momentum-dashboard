@@ -85,6 +85,47 @@ class SleeperClient:
         """Get current NBA state (week, season, season_type)."""
         return self._get("/state/nba")
 
+    def get_league_users(self):
+        """Fetch all users in the league. Returns list of user dicts."""
+        return self._get(f"/league/{self.league_id}/users")
+
+    def get_teams(self):
+        """
+        Get all teams in the league with display names.
+
+        Joins league users with rosters by owner_id.
+        Returns list of {roster_id, owner_id, team_name, username, is_mine},
+        sorted with my team first, then alphabetical by team_name.
+        """
+        users = self.get_league_users()
+        rosters = self.get_rosters()
+        my_user_id = self.get_user_id()
+
+        # Build user lookup by user_id
+        user_map = {}
+        for u in users:
+            user_map[u["user_id"]] = u
+
+        teams = []
+        for roster in rosters:
+            owner_id = roster.get("owner_id")
+            user = user_map.get(owner_id, {})
+            metadata = user.get("metadata", {}) or {}
+            display_name = user.get("display_name", user.get("username", "Unknown"))
+            team_name = metadata.get("team_name") or f"{display_name}'s Team"
+
+            teams.append({
+                "roster_id": roster["roster_id"],
+                "owner_id": owner_id,
+                "team_name": team_name,
+                "username": user.get("username", ""),
+                "is_mine": owner_id == my_user_id,
+            })
+
+        # Sort: my team first, then alphabetical
+        teams.sort(key=lambda t: (not t["is_mine"], t["team_name"].lower()))
+        return teams
+
     # --- Rosters ---
 
     def get_rosters(self):
@@ -185,6 +226,83 @@ class SleeperClient:
                 bench.append(info)
 
         return {"starters": starters, "bench": bench, "reserve": reserve}
+
+    def get_roster_with_names_for(self, roster_id):
+        """
+        Get any roster by roster_id with player names resolved.
+
+        Same return format as get_roster_with_names():
+        {starters: [{player_id, name, team, position}], bench: [...], reserve: [...]}
+        """
+        rosters = self.get_rosters()
+        roster = None
+        for r in rosters:
+            if r["roster_id"] == roster_id:
+                roster = r
+                break
+        if roster is None:
+            raise RuntimeError(f"No roster found with roster_id {roster_id}")
+
+        all_player_ids = roster.get("players", [])
+        starter_ids = set(roster.get("starters", []))
+        reserve_ids = set(roster.get("reserve", []) or [])
+
+        starters = []
+        bench = []
+        reserve = []
+
+        for pid in all_player_ids:
+            info = self.get_player_info(pid)
+            if pid in starter_ids:
+                starters.append(info)
+            elif pid in reserve_ids:
+                reserve.append(info)
+            else:
+                bench.append(info)
+
+        return {"starters": starters, "bench": bench, "reserve": reserve}
+
+    def get_all_rostered_player_ids(self):
+        """Get all player IDs across all rosters in the league. Returns a set."""
+        rosters = self.get_rosters()
+        rostered = set()
+        for roster in rosters:
+            for pid in roster.get("players", []) or []:
+                rostered.add(str(pid))
+        return rostered
+
+    def get_available_players(self, limit=50):
+        """
+        Get available (unrostered) NBA players.
+
+        Filters to players with an active NBA team and a position.
+        Returns list of {player_id, name, team, position}, sorted by name.
+        """
+        all_players = self.get_all_players()
+        rostered = self.get_all_rostered_player_ids()
+
+        available = []
+        for pid, player in all_players.items():
+            if str(pid) in rostered:
+                continue
+            # Must have an active NBA team and a position
+            team = player.get("team")
+            position = player.get("position")
+            name = player.get("full_name")
+            if not team or not position or not name:
+                continue
+            # Filter to active NBA players only
+            if player.get("active") is False:
+                continue
+            available.append({
+                "player_id": str(pid),
+                "name": name,
+                "team": team,
+                "position": position,
+            })
+
+        available.sort(key=lambda p: p["name"])
+        return available[:limit]
 
     # --- Weekly stats (limited — see CLAUDE.md for why we also use nba_api) ---
 
