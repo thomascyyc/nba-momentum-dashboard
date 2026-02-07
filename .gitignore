@@ -25,3 +25,4 @@ Thumbs.db
 *.db
 *.sqlite3
 players_cache.json
+game_log_cache.json
