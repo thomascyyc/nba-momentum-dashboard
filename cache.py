@@ -381,3 +381,31 @@ def get_player_games(cache, player_id, last_n=None, roster_id=None, source="team
     if last_n and last_n > 0:
         games = games[:last_n]
     return games
+
+
+def is_cache_stale(cache, roster_id=None, max_age_hours=6.0):
+    """Check if the cache is older than max_age_hours.
+
+    Used for auto-refresh-on-load behavior.
+    Returns True if stale or missing, False if fresh.
+    """
+    if cache is None:
+        return True
+
+    if roster_id is not None:
+        team = cache.get("teams", {}).get(str(roster_id), {})
+        ts = team.get("metadata", {}).get("last_refresh")
+    else:
+        timestamps = []
+        for team_data in cache.get("teams", {}).values():
+            ts_val = team_data.get("metadata", {}).get("last_refresh")
+            if ts_val is not None:
+                timestamps.append(ts_val)
+        ts = max(timestamps) if timestamps else None
+
+    if ts is None:
+        return True
+
+    import time
+    elapsed_hours = (time.time() - ts) / 3600
+    return elapsed_hours > max_age_hours

@@ -26,3 +26,13 @@ Thumbs.db
 *.sqlite3
 players_cache.json
 game_log_cache.json
+
+# Phase 1A data files
+data/
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Pytest
+.pytest_cache/
