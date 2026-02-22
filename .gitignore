@@ -27,8 +27,8 @@ Thumbs.db
 players_cache.json
 game_log_cache.json
 
-# Phase 1A data files
-data/
+# Phase 1A data files (root-level only, not src/data/)
+/data/
 *.parquet
 
 # Jupyter
