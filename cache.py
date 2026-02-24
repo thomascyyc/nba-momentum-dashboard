@@ -261,6 +261,7 @@ def build_team_cache(roster, roster_id, team_name, existing_cache, progress_call
         pid = player["player_id"]
         name = player["name"]
         team = player.get("team", "?")
+        print(f"  Loading {name}... ({i + 1}/{total})")
         players_data[pid] = _fetch_player_games(pid, name, team)
 
     if progress_callback:
@@ -310,6 +311,7 @@ def build_available_cache(available_players, existing_cache, progress_callback=N
         team = player.get("team", "?")
         position = player.get("position", "?")
 
+        print(f"  Loading {name}... ({i + 1}/{total})")
         player_data = _fetch_player_games(pid, name, team)
         player_data["position"] = position
 
