@@ -205,9 +205,30 @@ ADV_STAT_COLUMNS = [
 def join_advanced_stats(df: pd.DataFrame, season: str) -> pd.DataFrame:
     """Join season-level advanced stats to game log rows.
 
-    Returns df unchanged if advanced stats are unavailable.
+    Tries BBRef first (slug PLAYER_ID matches game logs), falls back to NBA.com.
+    Returns df unchanged if advanced stats are unavailable from both.
     """
-    adv_df = get_player_advanced_stats(season)
+    adv_df = None
+
+    # Try BBRef first — uses slug PLAYER_ID matching our game logs
+    try:
+        from src.data.bbref_advanced import get_player_advanced_stats_bbref
+        adv_df = get_player_advanced_stats_bbref(season)
+    except Exception as e:
+        logger.warning(f"BBRef advanced stats failed for {season}: {e}")
+
+    # Fallback to NBA.com if BBRef failed
+    if adv_df is None:
+        nba_adv = get_player_advanced_stats(season)
+        if nba_adv is not None:
+            # NBA.com uses numeric IDs — only use if game logs also have numeric IDs
+            if df["PLAYER_ID"].dtype == nba_adv["PLAYER_ID"].dtype:
+                adv_df = nba_adv
+            else:
+                logger.warning(
+                    f"NBA.com advanced stats PLAYER_ID type ({nba_adv['PLAYER_ID'].dtype}) "
+                    f"doesn't match game logs ({df['PLAYER_ID'].dtype}), skipping"
+                )
 
     if adv_df is None:
         logger.warning(f"Advanced stats unavailable for {season}, skipping join")

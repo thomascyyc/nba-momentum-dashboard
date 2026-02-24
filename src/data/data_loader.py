@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.data.nba_api_client import get_player_game_logs, DATA_DIR, HISTORICAL_SEASONS, _parquet_engine
+from src.data.nba_api_client import get_player_game_logs, DATA_DIR, HISTORICAL_SEASONS, CURRENT_SEASON, _parquet_engine
 from src.data.feature_engineering import engineer_all_features
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,11 @@ def load_all_seasons(
         logger.info(f"Loading season {season}...")
         df = load_season(season, force_refresh=force_refresh)
         dfs.append(df)
+
+    # Normalize datetime precision before concat (avoids ns/ms mismatch)
+    for df in dfs:
+        if "game_date_parsed" in df.columns:
+            df["game_date_parsed"] = pd.to_datetime(df["game_date_parsed"]).dt.floor("s")
 
     combined = pd.concat(dfs, ignore_index=True)
 

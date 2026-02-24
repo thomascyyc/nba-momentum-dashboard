@@ -26,7 +26,8 @@ MAX_RETRIES = 3
 RETRY_DELAYS = [3, 6, 12]
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-HISTORICAL_SEASONS = ["2021-22", "2022-23", "2023-24"]
+HISTORICAL_SEASONS = ["2021-22", "2022-23", "2023-24", "2024-25"]
+CURRENT_SEASON = "2025-26"
 
 # Map BBRef team enums to standard 3-letter abbreviations
 _TEAM_ABBREV = {
@@ -131,7 +132,11 @@ def _api_call_with_retry(fetch_fn, description: str, retries: int = MAX_RETRIES)
 # ── Player Game Logs (Basketball Reference) ──────────────────────
 
 def _get_game_dates(season_end_year: int) -> list[date]:
-    """Get all unique game dates for a season from BBRef schedule."""
+    """Get all unique game dates for a season from BBRef schedule.
+
+    For in-progress seasons, caps at yesterday to avoid requesting future dates.
+    """
+    from datetime import timedelta
     from basketball_reference_web_scraper import client as bbref
 
     sched = bbref.season_schedule(season_end_year=season_end_year)
@@ -141,9 +146,16 @@ def _get_game_dates(season_end_year: int) -> list[date]:
     all_dates = sorted(set(s["start_time"].date() for s in sched))
 
     # Regular season typically ends mid-April
-    # Filter out anything after April 20 (safe cutoff for regular season)
     cutoff = date(season_end_year, 4, 20)
-    reg_dates = [d for d in all_dates if d <= cutoff]
+
+    # For in-progress seasons, cap at yesterday (no future dates)
+    yesterday = date.today() - timedelta(days=1)
+    effective_cutoff = min(cutoff, yesterday)
+
+    reg_dates = [d for d in all_dates if d <= effective_cutoff]
+
+    if not reg_dates:
+        raise RuntimeError(f"No game dates found for season ending {season_end_year}")
 
     logger.info(f"  {len(reg_dates)} regular season game dates "
                f"({reg_dates[0]} to {reg_dates[-1]})")

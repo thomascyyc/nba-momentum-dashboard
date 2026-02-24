@@ -18,6 +18,15 @@ from cache import (
 )
 from scoring import calculate_fantasy_points
 
+# ML predictions (optional — gracefully skip if model not trained)
+_ML_AVAILABLE = False
+try:
+    from src.ml.predict_live import predict_for_player
+    from src.ml.model import load_model, MODEL_DIR
+    _ML_AVAILABLE = load_model() is not None
+except Exception:
+    pass
+
 # --- Page config (must be first Streamlit call) ---
 st.set_page_config(
     page_title="NBA Momentum",
@@ -334,15 +343,27 @@ def build_section_df(players, section_label, rid):
         games = get_player_games(cache, pid, last_n=window, roster_id=rid)
         avg_fpts, momentum, label, last_fpts = calc_momentum(games, window)
 
+        # ML prediction
+        pred_str = "—"
+        pred_val = 0
+        if _ML_AVAILABLE:
+            all_games = get_player_games(cache, pid, roster_id=rid)
+            pred = predict_for_player(all_games) if all_games else None
+            if pred:
+                pred_str = f"{pred['predicted_fpts']:.1f}"
+                pred_val = pred["predicted_fpts"]
+
         rows.append({
             "Player": p["name"],
             "Pos": p.get("position", "?"),
             "Team": p.get("team", "?"),
             "Avg FPTS": f"{avg_fpts:.1f}" if avg_fpts is not None else "—",
+            "Pred": pred_str,
             "Last Game": f"{last_fpts:.1f}" if last_fpts is not None else "—",
             "Trend": f"{trend_color(label)} {label}",
             "_avg": avg_fpts or 0,
             "_momentum": momentum or 0,
+            "_pred": pred_val,
             "_section": section_label,
             "_player_id": pid,
             "_name": p["name"],
@@ -373,7 +394,10 @@ else:
         section_rows.sort(key=lambda r: r[sort_key], reverse=True)
         st.subheader(section)
 
-        display_df = pd.DataFrame(section_rows)[["Player", "Pos", "Team", "Avg FPTS", "Last Game", "Trend"]]
+        display_cols = ["Player", "Pos", "Team", "Avg FPTS", "Last Game", "Trend"]
+        if _ML_AVAILABLE:
+            display_cols.insert(4, "Pred")
+        display_df = pd.DataFrame(section_rows)[display_cols]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # --- Momentum chart ---
@@ -425,11 +449,59 @@ else:
                 .properties(height=300)
                 .interactive()
             )
+
+            # Add prediction reference lines (dashed)
+            if _ML_AVAILABLE:
+                pred_data = []
+                for row in all_rows:
+                    if row["_name"] in selected_players and row.get("_pred", 0) > 0:
+                        pred_data.append({
+                            "Player": row["_name"],
+                            "Predicted": row["_pred"],
+                        })
+                if pred_data:
+                    pred_df = pd.DataFrame(pred_data)
+                    pred_lines = (
+                        alt.Chart(pred_df)
+                        .mark_rule(strokeDash=[5, 5], opacity=0.6)
+                        .encode(
+                            y="Predicted:Q",
+                            color=alt.Color("Player:N"),
+                        )
+                    )
+                    chart = chart + pred_lines
+
             st.altair_chart(chart, use_container_width=True)
         else:
             st.info("No game data available for selected players.")
     else:
         st.info("Select players above to see their momentum chart.")
+
+
+# --- ML Insights section ---
+if _ML_AVAILABLE:
+    st.divider()
+    with st.expander("ML Insights"):
+        import json as _json
+        _model_data = load_model()
+        if _model_data:
+            _, _metadata = _model_data
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Test MAE", f"{_metadata['metrics']['mae']:.1f} FPTS")
+                st.metric("Test R-squared", f"{_metadata['metrics']['r2']:.3f}")
+            with col2:
+                st.metric("Features", _metadata["n_features"])
+                st.metric("Model", _metadata["model_type"])
+
+            st.caption(f"Trained: {_metadata.get('training_date', 'unknown')[:10]}")
+
+            # Feature importance
+            fi_path = MODEL_DIR / "feature_importance.csv"
+            if fi_path.exists():
+                fi_df = pd.read_csv(fi_path).head(10)
+                st.subheader("Top 10 Predictors")
+                st.dataframe(fi_df, use_container_width=True, hide_index=True)
 
 
 # --- Waiver Wire section ---
@@ -474,11 +546,20 @@ else:
         avg_fpts, momentum, label, last_fpts = calc_momentum(games, window)
         season_avg = pdata.get("season_avg_fppg", 0)
 
+        # ML prediction for waiver players
+        pred_str = "—"
+        if _ML_AVAILABLE:
+            all_games = get_player_games(cache, pid, source="available")
+            pred = predict_for_player(all_games) if all_games else None
+            if pred:
+                pred_str = f"{pred['predicted_fpts']:.1f}"
+
         waiver_rows.append({
             "Player": pdata["name"],
             "Pos": pos,
             "Team": pdata.get("team", "?"),
             "Szn Avg": f"{season_avg:.1f}" if season_avg else "—",
+            "Pred": pred_str,
             "Avg FPTS": f"{avg_fpts:.1f}" if avg_fpts is not None else "—",
             "Last Game": f"{last_fpts:.1f}" if last_fpts is not None else "—",
             "Trend": f"{trend_color(label)} {label}",
@@ -493,7 +574,10 @@ else:
         pos_label = f" {position_filter}" if position_filter != "ALL" else ""
         st.caption(f"Top {len(waiver_rows)} available{pos_label} players")
 
-        waiver_df = pd.DataFrame(waiver_rows)[["Player", "Pos", "Team", "Szn Avg", "Avg FPTS", "Last Game", "Trend"]]
+        waiver_cols = ["Player", "Pos", "Team", "Szn Avg", "Avg FPTS", "Last Game", "Trend"]
+        if _ML_AVAILABLE:
+            waiver_cols.insert(4, "Pred")
+        waiver_df = pd.DataFrame(waiver_rows)[waiver_cols]
         st.dataframe(waiver_df, use_container_width=True, hide_index=True)
     else:
         pos_label = f" {position_filter}" if position_filter != "ALL" else ""

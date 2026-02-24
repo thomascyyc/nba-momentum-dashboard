@@ -34,5 +34,8 @@ game_log_cache.json
 # Jupyter
 .ipynb_checkpoints/
 
+# ML model artifacts
+data/model/
+
 # Pytest
 .pytest_cache/

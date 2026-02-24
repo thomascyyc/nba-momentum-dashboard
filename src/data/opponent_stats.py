@@ -32,10 +32,22 @@ OPP_STAT_COLUMNS = {
 def build_opponent_defense_lookup(season: str) -> pd.DataFrame | None:
     """Build a lookup table of opponent defense metrics indexed by team abbreviation.
 
+    Prefers computing from game logs (matches our data exactly), falls back to NBA.com.
     Returns DataFrame with TEAM_ABBREVIATION as index and opp_def_* columns,
     or None if data is unavailable.
     """
-    df = get_team_opponent_stats(season)
+    df = None
+
+    # Try computing from our own game logs first (no extra API calls, guaranteed match)
+    try:
+        from src.data.bbref_advanced import compute_team_defense_from_game_logs
+        df = compute_team_defense_from_game_logs(season)
+    except Exception as e:
+        logger.warning(f"Could not compute team defense for {season}: {e}")
+
+    # Fallback to NBA.com endpoint
+    if df is None:
+        df = get_team_opponent_stats(season)
 
     if df is None:
         logger.warning(f"Team opponent stats unavailable for {season}")
